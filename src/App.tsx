@@ -1,9 +1,12 @@
 import { motion } from 'framer-motion'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { memories } from './data/memories'
+import backgroundLayer from '../b2.png'
+import foregroundLayer from '../foreground.png'
 
 type ScreenName =
   | 'delivery'
+  | 'gallery'
   | 'greeting'
   | 'map'
   | 'memory'
@@ -68,24 +71,165 @@ const heartValues = {
   broken: -1,
 } as const
 
-const mazeRoute = [
-  { x: 14, y: 78 },
-  { x: 22, y: 71 },
-  { x: 30, y: 64 },
-  { x: 38, y: 58 },
-  { x: 47, y: 46 },
-  { x: 56, y: 38 },
-  { x: 66, y: 28 },
-  { x: 78, y: 18 },
-  { x: 88, y: 18 },
-]
+const mazeRows = 9
+const mazeColumns = 13
+const mazeStart = { row: 1, column: 1 }
+const mazeGoal = { row: 7, column: 11 }
 
-const activeMazePoints = (points: Array<{ x: number; y: number }>) => (points.length > 1 ? points : mazeRoute)
+const cakeAssetSources = {
+  carrier: '/Gemini_Generated_Image_2gywdf2gywdf2gyw.png',
+  cake: '/Gemini_Generated_Image_gd6ob1gd6ob1gd6o.png',
+  sloth: '/Gemini_Generated_Image_t2e354t2e354t2e3.png',
+  slice: '/Gemini_Generated_Image_y6244vy6244vy624.png',
+}
+
+const createMazeWalls = () => {
+  const walls = new Set<string>()
+  const visited = new Set<string>(['1-1'])
+  const stack = [mazeStart]
+
+  for (let row = 0; row < mazeRows; row += 1) {
+    for (let column = 0; column < mazeColumns; column += 1) {
+      if (row === 0 || column === 0 || row === mazeRows - 1 || column === mazeColumns - 1 || row % 2 === 0 || column % 2 === 0) {
+        walls.add(`${row}-${column}`)
+      }
+    }
+  }
+
+  while (stack.length > 0) {
+    const current = stack[stack.length - 1]
+    const directions = [
+      { row: -2, column: 0 },
+      { row: 2, column: 0 },
+      { row: 0, column: -2 },
+      { row: 0, column: 2 },
+    ].sort(() => Math.random() - 0.5)
+    let carved = false
+
+    for (const direction of directions) {
+      const next = { row: current.row + direction.row, column: current.column + direction.column }
+      const nextKey = `${next.row}-${next.column}`
+      if (next.row < 1 || next.row >= mazeRows - 1 || next.column < 1 || next.column >= mazeColumns - 1 || visited.has(nextKey)) continue
+
+      visited.add(nextKey)
+      walls.delete(nextKey)
+      walls.delete(`${current.row + direction.row / 2}-${current.column + direction.column / 2}`)
+      stack.push(next)
+      carved = true
+      break
+    }
+
+    if (!carved) stack.pop()
+  }
+
+  return walls
+}
+
+const transparentForeground = (source: string) => new Promise<string>((resolve) => {
+  const image = new Image()
+  image.onload = () => {
+    const canvas = document.createElement('canvas')
+    canvas.width = image.naturalWidth
+    canvas.height = image.naturalHeight
+    const context = canvas.getContext('2d')
+    if (!context) {
+      resolve(source)
+      return
+    }
+
+    context.drawImage(image, 0, 0)
+    const imageData = context.getImageData(0, 0, canvas.width, canvas.height)
+    const pixels = imageData.data
+    const visited = new Uint8Array(canvas.width * canvas.height)
+    const queue: number[] = []
+
+    for (let x = 0; x < canvas.width; x += 1) {
+      queue.push(x, (canvas.height - 1) * canvas.width + x)
+    }
+    for (let y = 1; y < canvas.height - 1; y += 1) {
+      queue.push(y * canvas.width, y * canvas.width + canvas.width - 1)
+    }
+
+    while (queue.length > 0) {
+      const index = queue.pop() ?? 0
+      if (visited[index]) continue
+      visited[index] = 1
+      const red = pixels[index * 4]
+      const green = pixels[index * 4 + 1]
+      const blue = pixels[index * 4 + 2]
+      const alpha = pixels[index * 4 + 3]
+      if (alpha === 0 || red < 235 || green < 235 || blue < 235) continue
+      pixels[index * 4 + 3] = 0
+      const x = index % canvas.width
+      const y = Math.floor(index / canvas.width)
+      if (x > 0) queue.push(index - 1)
+      if (x < canvas.width - 1) queue.push(index + 1)
+      if (y > 0) queue.push(index - canvas.width)
+      if (y < canvas.height - 1) queue.push(index + canvas.width)
+    }
+
+    context.putImageData(imageData, 0, 0)
+    resolve(canvas.toDataURL('image/png'))
+  }
+  image.onerror = () => resolve(source)
+  image.src = source
+})
+
+const transparentAsset = (source: string) => new Promise<string>((resolve) => {
+  const image = new Image()
+  image.onload = () => {
+    const canvas = document.createElement('canvas')
+    canvas.width = image.naturalWidth
+    canvas.height = image.naturalHeight
+    const context = canvas.getContext('2d')
+    if (!context) {
+      resolve(source)
+      return
+    }
+
+    context.drawImage(image, 0, 0)
+    const imageData = context.getImageData(0, 0, canvas.width, canvas.height)
+    const pixels = imageData.data
+    const visited = new Uint8Array(canvas.width * canvas.height)
+    const queue = [0]
+    const background = [pixels[0], pixels[1], pixels[2]]
+
+    while (queue.length > 0) {
+      const index = queue.pop() ?? 0
+      if (visited[index]) continue
+      visited[index] = 1
+      const pixelOffset = index * 4
+      const red = pixels[pixelOffset]
+      const green = pixels[pixelOffset + 1]
+      const blue = pixels[pixelOffset + 2]
+      const alpha = pixels[pixelOffset + 3]
+      const distance = Math.hypot(red - background[0], green - background[1], blue - background[2])
+      if (alpha === 0 || distance > 72) continue
+      pixels[pixelOffset + 3] = 0
+      const x = index % canvas.width
+      const y = Math.floor(index / canvas.width)
+      if (x > 0) queue.push(index - 1)
+      if (x < canvas.width - 1) queue.push(index + 1)
+      if (y > 0) queue.push(index - canvas.width)
+      if (y < canvas.height - 1) queue.push(index + canvas.width)
+    }
+
+    context.putImageData(imageData, 0, 0)
+    resolve(canvas.toDataURL('image/png'))
+  }
+  image.onerror = () => resolve(source)
+  image.src = source
+})
 
 function App() {
   const [screen, setScreen] = useState<ScreenName>('delivery')
   const [musicOn, setMusicOn] = useState(false)
   const [deliveryOpened, setDeliveryOpened] = useState(false)
+  const [deliveryMovieReady, setDeliveryMovieReady] = useState(false)
+  const [foregroundSource, setForegroundSource] = useState(foregroundLayer)
+  const [cakeAssets, setCakeAssets] = useState(cakeAssetSources)
+  const [flippedGalleryPhotos, setFlippedGalleryPhotos] = useState<number[]>([])
+  const [galleryNotice, setGalleryNotice] = useState('')
   const [scrapbookPage, setScrapbookPage] = useState(0)
   const [selectedPhoto, setSelectedPhoto] = useState<MemoryPhoto | null>(null)
   const [photoFlipped, setPhotoFlipped] = useState(false)
@@ -97,24 +241,42 @@ function App() {
   const [catchToast, setCatchToast] = useState('')
   const [catchGameOver, setCatchGameOver] = useState(false)
   const [catchEndingText, setCatchEndingText] = useState('No problem, darling. Anyway, my heart is already yours.')
-  const [questMessage, setQuestMessage] = useState('Draw a warm little path to home, sweetheart.')
+  const [questMessage, setQuestMessage] = useState('Use the arrow keys to guide the sloth to the penguin.')
   const [questWon, setQuestWon] = useState(false)
-  const [mazePath, setMazePath] = useState<Array<{ x: number; y: number }>>([])
-  const [mazeDrawing, setMazeDrawing] = useState(false)
+  const [questPlayer, setQuestPlayer] = useState(mazeStart)
+  const [questWalls, setQuestWalls] = useState(createMazeWalls)
+  const [questTrail, setQuestTrail] = useState<string[]>(['1-1'])
   const [noAttempts, setNoAttempts] = useState(0)
   const [yesClicked, setYesClicked] = useState(false)
   const [noButtonPos, setNoButtonPos] = useState({ x: 62, y: 70 })
   const [clickedPenguins, setClickedPenguins] = useState<number[]>([])
   const [selectedPenguin, setSelectedPenguin] = useState<PenguinCard | null>(null)
-  const [cakeBaked, setCakeBaked] = useState(false)
-  const [cakeLit, setCakeLit] = useState(false)
-  const [cakeBlown, setCakeBlown] = useState(false)
-  const [smokeVisible, setSmokeVisible] = useState(false)
-  const [birthdayReveal, setBirthdayReveal] = useState(false)
+  const [cakeStage, setCakeStage] = useState<'peek' | 'leaving' | 'returning' | 'ready' | 'countdown' | 'cut' | 'eating'>('peek')
+  const [cakeCountdown, setCakeCountdown] = useState(0)
   const [hugPlayed, setHugPlayed] = useState(false)
   const [currentQuestionReaction, setCurrentQuestionReaction] = useState('')
   const audioContextRef = useRef<AudioContext | null>(null)
   const musicTimerRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    let active = true
+    void transparentForeground(foregroundLayer).then((source) => {
+      if (active) setForegroundSource(source)
+    })
+    return () => {
+      active = false
+    }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    void Promise.all(Object.entries(cakeAssetSources).map(async ([key, source]) => [key, await transparentAsset(source)] as const)).then((entries) => {
+      if (active) setCakeAssets(Object.fromEntries(entries) as typeof cakeAssetSources)
+    })
+    return () => {
+      active = false
+    }
+  }, [])
 
   const scrapbookPages = useMemo(() => {
     const chunkSize = 8
@@ -122,6 +284,8 @@ function App() {
       memories.slice(pageIndex * chunkSize, pageIndex * chunkSize + chunkSize),
     )
   }, [])
+
+  const galleryPhotos = useMemo(() => [...memories].sort(() => Math.random() - 0.5).slice(0, 8), [])
 
   const resetCatchGame = () => {
     setCatchScore(0)
@@ -135,10 +299,11 @@ function App() {
   }
 
   const resetQuestGame = () => {
-    setQuestMessage('Draw a warm little path to home, sweetheart.')
+    setQuestMessage('Use the arrow keys to guide the sloth to the penguin.')
     setQuestWon(false)
-    setMazePath([])
-    setMazeDrawing(false)
+    setQuestPlayer(mazeStart)
+    setQuestWalls(createMazeWalls())
+    setQuestTrail(['1-1'])
   }
 
   const ensureNoPosition = (nextX: number, nextY: number) => {
@@ -320,39 +485,58 @@ function App() {
   }, [catchScore, screen])
 
   useEffect(() => {
-    if (screen !== 'quest') return
-    if (mazePath.length < 4) return
+    if (screen !== 'quest' || questWon) return
 
-    const lastPoint = mazePath[mazePath.length - 1]
-    const endReached = Math.hypot(lastPoint.x - 88, lastPoint.y - 18) < 7
+    const handleMazeKey = (event: KeyboardEvent) => {
+      const direction = {
+        ArrowUp: { row: -1, column: 0 },
+        ArrowDown: { row: 1, column: 0 },
+        ArrowLeft: { row: 0, column: -1 },
+        ArrowRight: { row: 0, column: 1 },
+      }[event.key]
+      if (!direction) return
 
-    if (endReached) {
-      setQuestWon(true)
-      setQuestMessage('Mission accomplished! You found your Home Minister. Unfortunately, she\'s permanently attached to you.')
+      event.preventDefault()
+      const next = {
+        row: questPlayer.row + direction.row,
+        column: questPlayer.column + direction.column,
+      }
+      const outsideMaze = next.row < 1 || next.row >= mazeRows - 1 || next.column < 1 || next.column >= mazeColumns - 1
+      if (outsideMaze || questWalls.has(`${next.row}-${next.column}`)) {
+        setQuestMessage('That way is blocked. Try another arrow, sweetheart.')
+        return
+      }
+
+      setQuestPlayer(next)
+      setQuestTrail((previous) => previous.includes(`${next.row}-${next.column}`) ? previous : [...previous, `${next.row}-${next.column}`])
+      if (next.row === mazeGoal.row && next.column === mazeGoal.column) {
+        setQuestWon(true)
+        setQuestMessage('You found your penguin! Love always knows the way home.')
+      } else {
+        setQuestMessage('Keep going. Your penguin is waiting at the end.')
+      }
     }
-  }, [mazePath, screen])
+
+    window.addEventListener('keydown', handleMazeKey)
+    return () => window.removeEventListener('keydown', handleMazeKey)
+  }, [questPlayer, questWalls, questWon, screen])
 
   useEffect(() => {
-    if (screen !== 'cake' || cakeBaked) return
-    const timer = window.setTimeout(() => {
-      setCakeBaked(true)
-    }, 1800)
-    return () => window.clearTimeout(timer)
-  }, [screen, cakeBaked])
+    if (screen !== 'cake') return
+    setCakeStage('ready')
+    setCakeCountdown(0)
+  }, [screen])
 
   useEffect(() => {
-    if (screen !== 'delivery') return
-    if (deliveryOpened) {
-      const timer = window.setTimeout(() => setScreen('greeting'), 1300)
+    if (screen !== 'cake') return
+    if (cakeStage === 'countdown' && cakeCountdown > 0) {
+      const timer = window.setTimeout(() => setCakeCountdown((value) => value - 1), 1000)
       return () => window.clearTimeout(timer)
     }
-  }, [screen, deliveryOpened])
-
-  useEffect(() => {
-    if (screen !== 'birthday') return
-    const timer = window.setTimeout(() => setBirthdayReveal(true), 700)
-    return () => window.clearTimeout(timer)
-  }, [screen])
+    if (cakeStage === 'countdown' && cakeCountdown === 0) {
+      setCakeStage('cut')
+    }
+  }, [screen, cakeStage, cakeCountdown])
 
   useEffect(() => {
     if (screen !== 'hug') return
@@ -382,36 +566,42 @@ function App() {
   )
 
   const renderDeliveryScene = () => (
-    <div className="page delivery-page">
-      <div className="cloud cloud-one" />
-      <div className="cloud cloud-two" />
-      <div className="cloud cloud-three" />
-      <motion.div
-        className="delivery-penguin-wrap"
-        animate={{ x: [0, 10, -10, 0], rotate: [0, -2, 1, 0] }}
-        transition={{ duration: 6, repeat: Infinity, ease: 'easeInOut' }}
-      >
-        {renderPenguin('walking', 1.2)}
-        <div className="envelope">💌</div>
-      </motion.div>
-      <div className="card soft-card delivery-card">
-        <h1>URGENT LOVE DELIVERY! 💌</h1>
-        <p className="tiny-copy">To: My Love</p>
-        <p className="tiny-copy">From: Your Home Minister</p>
-        <p className="subtext">Apparently someone very special was born today... and his girlfriend has been planning something suspiciously cute.</p>
-        <button type="button" className="primary-button" onClick={() => { setDeliveryOpened(true); setScreen('delivery') }}>
-          Open Your Surprise ❤️
-        </button>
+    <div className={`page delivery-page ${deliveryOpened ? 'delivery-opened' : ''}`}>
+      <div className="storybook-scene" aria-hidden="true">
+        <img className="storybook-background" src={backgroundLayer} alt="" />
+        <img className="storybook-foreground" src={foregroundSource} alt="" />
+      </div>
+      <div className="mailroom-snow" aria-hidden="true">
+        {[...Array(14)].map((_, index) => <span key={`snow-${index}`} style={{ '--snow-delay': `${index * 0.7}s` } as React.CSSProperties} />)}
+      </div>
+      <div className="delivery-copy" aria-live="polite">
+        <p className="eyebrow">WELCOME TO CHILL & WADDLE!</p>
+        <h1>{deliveryOpened ? 'A little movie is beginning...' : <>Where A Sloth & A Penguin Discover<br />Unexpected Friendship & Adventures!</>}</h1>
+        {!deliveryOpened && (
+          <>
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => {
+                setDeliveryOpened(true)
+              }}
+            >
+              START OUR STORY
+            </button>
+          </>
+        )}
       </div>
       {deliveryOpened && (
-        <div className="floating-hearts">
-          {[...Array(18)].map((_, index) => (
+        <div className="heart-ripple" aria-hidden="true">
+          {[...Array(32)].map((_, index) => (
             <motion.span
               key={`heart-${index}`}
               className="heart-pop"
-              initial={{ opacity: 0, y: 40, x: 0 }}
-              animate={{ opacity: 1, y: -140, x: index % 2 === 0 ? 18 : -18, scale: 1.3 }}
-              transition={{ duration: 1.8, ease: 'easeOut', delay: index * 0.08 }}
+              onAnimationEnd={index === 31 ? () => setDeliveryMovieReady(true) : undefined}
+              style={{
+                '--heart-angle': `${(index / 32) * 360}deg`,
+                '--heart-delay': '0s',
+              } as React.CSSProperties}
             >
               ❤️
             </motion.span>
@@ -421,6 +611,16 @@ function App() {
       <button type="button" className="music-toggle" onClick={() => setMusicOn((value) => !value)}>
         {musicOn ? '🔊 Music On' : '🔇 Music Off'}
       </button>
+      {deliveryMovieReady && (
+        <motion.div className="movie-title-reveal" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+          <p className="movie-kicker">A birthday story begins</p>
+          <h2>Birthday wishes to<br />Mr. Sloth Berry</h2>
+          <p>With love from “Home Minister”</p>
+          <button type="button" className="primary-button" onClick={() => setScreen('gallery')}>
+            Begin the movie <span aria-hidden="true">→</span>
+          </button>
+        </motion.div>
+      )}
     </div>
   )
 
@@ -438,6 +638,60 @@ function App() {
           Begin Your Birthday Adventure
         </button>
       </div>
+    </div>
+  )
+
+  const renderGalleryPage = () => (
+    <div className="page gallery-page">
+      <div className="gallery-header">
+        <p className="eyebrow">A LITTLE COLLECTION OF US</p>
+        <h1>Open a little love note</h1>
+        <p className="subtext">Tap each picture to discover what is waiting on the other side.</p>
+      </div>
+      <div className="gallery-grid">
+        {galleryPhotos.map((photo) => {
+          const isFlipped = flippedGalleryPhotos.includes(photo.id)
+          return (
+            <button
+              key={photo.id}
+              type="button"
+              className={`gallery-card ${photo.frame} ${isFlipped ? 'flipped' : ''}`}
+              onClick={() => {
+                if (!isFlipped) {
+                  setFlippedGalleryPhotos((previous) => [...previous, photo.id])
+                }
+              }}
+              aria-label={isFlipped ? `Message revealed for ${photo.label}` : `Reveal message for ${photo.label}`}
+            >
+              <span className="gallery-card-inner">
+                <span className="gallery-card-face gallery-card-front">
+                  <img className="gallery-card-backdrop" src={photo.src} alt="" aria-hidden="true" />
+                  <img src={photo.src} alt={photo.label} style={{ objectPosition: photo.position }} />
+                </span>
+                <span className="gallery-card-face gallery-card-back">
+                  <span className="gallery-heart">♥</span>
+                  <span>{photo.hiddenMessage}</span>
+                </span>
+              </span>
+            </button>
+          )
+        })}
+      </div>
+      {galleryNotice && <p className="gallery-notice" role="status">{galleryNotice}</p>}
+      <button
+        type="button"
+        className="primary-button gallery-continue"
+        onClick={() => {
+          if (flippedGalleryPhotos.length < galleryPhotos.length) {
+            setGalleryNotice('Why?? 😢 Please open all the pictures first!')
+            window.setTimeout(() => setGalleryNotice(''), 2200)
+            return
+          }
+          setScreen('quest')
+        }}
+      >
+        Continue our story <span aria-hidden="true">→</span>
+      </button>
     </div>
   )
 
@@ -595,86 +849,35 @@ function App() {
   const renderQuest = () => (
     <div className="page quest-page">
       <div className="card game-header">
-        <h2>Operation: Find Your Home Minister</h2>
+        <h2>Guide the Sloth to the Penguin</h2>
+        <p className="subtext">Use the arrow keys to find the way through the maze.</p>
       </div>
-      <div
-        className="quest-track"
-        onPointerDown={(event) => {
-          const rect = event.currentTarget.getBoundingClientRect()
-          const x = ((event.clientX - rect.left) / rect.width) * 100
-          const y = ((event.clientY - rect.top) / rect.height) * 100
-          setMazeDrawing(true)
-          setMazePath([{ x, y }])
-        }}
-        onPointerMove={(event) => {
-          if (!mazeDrawing) return
-          const rect = event.currentTarget.getBoundingClientRect()
-          const x = ((event.clientX - rect.left) / rect.width) * 100
-          const y = ((event.clientY - rect.top) / rect.height) * 100
-          setMazePath((previous) => {
-            const last = previous[previous.length - 1]
-            if (!last) return [{ x, y }]
-            const dist = Math.hypot(x - last.x, y - last.y)
-            if (dist < 3) return previous
-            return [...previous, { x, y }]
-          })
-        }}
-        onPointerUp={() => {
-          setMazeDrawing(false)
-          if (mazePath.length > 6) {
-            const last = mazePath[mazePath.length - 1]
-            const success = Math.hypot(last.x - 88, last.y - 18) < 7
-            if (success) {
-              setQuestWon(true)
-              setQuestMessage('Mission accomplished! You found your Home Minister. Unfortunately, she\'s permanently attached to you.')
-            } else {
-              setQuestMessage('Almost! Try drawing a softer path toward the heart at the end.')
-            }
-          }
-        }}
-      >
-        <div className="maze-start">♥</div>
-        <div className="maze-end">🏠</div>
-        <div className="maze-obstacle maze-wall-1" />
-        <div className="maze-obstacle maze-wall-2" />
-        <div className="maze-obstacle maze-wall-3" />
-        <svg className="maze-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
-          <polyline
-            points={activeMazePoints(mazePath).map((point) => `${point.x},${point.y}`).join(' ')}
-            fill="none"
-            stroke="#f7d7e1"
-            strokeWidth="2.2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            opacity={mazePath.length > 1 ? 0.85 : 1}
-          />
-          {mazePath.length > 1 && (
-            <polyline
-              points={mazePath.map((point) => `${point.x},${point.y}`).join(' ')}
-              fill="none"
-              stroke="#d98198"
-              strokeWidth="2.4"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          )}
-        </svg>
-        <motion.div
-          className="quest-runner"
-          animate={{ left: `${Math.min(88, mazePath[mazePath.length - 1]?.x ?? 14)}%`, top: `${Math.min(82, mazePath[mazePath.length - 1]?.y ?? 78)}%` }}
-          transition={{ type: 'spring', stiffness: 120, damping: 18 }}
-        >
-          {renderPenguin('waddle', 0.52)}
-        </motion.div>
+      <div className="keyboard-maze" role="application" aria-label="Arrow key maze">
+        {Array.from({ length: mazeRows * mazeColumns }, (_, index) => {
+          const row = Math.floor(index / mazeColumns)
+          const column = index % mazeColumns
+          const isBoundary = row === 0 || row === mazeRows - 1 || column === 0 || column === mazeColumns - 1
+          const isWall = isBoundary || questWalls.has(`${row}-${column}`)
+          const isPlayer = row === questPlayer.row && column === questPlayer.column
+          const isGoal = row === mazeGoal.row && column === mazeGoal.column
+          const isTrail = questTrail.includes(`${row}-${column}`)
+          return (
+            <div key={`${row}-${column}`} className={`maze-cell ${isWall ? 'wall' : 'path'} ${isPlayer ? 'player' : ''} ${isGoal ? 'goal' : ''} ${isTrail ? 'trail' : ''}`}>
+              {!isWall && isPlayer && <span aria-label="Sloth">🦥</span>}
+              {!isWall && isGoal && !isPlayer && <span aria-label="Penguin">🐧</span>}
+              {!isWall && isTrail && !isPlayer && !isGoal && <span className="maze-trail-heart" aria-hidden="true">♥</span>}
+            </div>
+          )
+        })}
       </div>
       <p className="game-toast">{questMessage}</p>
       {questWon && (
         <div className="game-finish small-finish">
           <h3>{questMessage}</h3>
-          <div className="hug-penguins">{renderPenguin('hug', 1)} {renderPenguin('hug', 1)}</div>
+          <div className="maze-celebration">🦥 💕 🐧</div>
           <div className="button-row">
             <button type="button" className="primary-button" onClick={() => { resetQuestGame(); setScreen('quest') }}>Replay</button>
-            <button type="button" className="secondary-button" onClick={() => setScreen('map')}>Back</button>
+            <button type="button" className="secondary-button" onClick={() => setScreen('cake')}>Continue</button>
           </div>
         </div>
       )}
@@ -764,37 +967,37 @@ function App() {
   )
 
   const renderCakePage = () => (
-    <div className="page cake-page">
-      <div className="cake-scene">
-        <div className="counter-scene">
-          <div className="female-chef-wrap">
-            {renderPenguin('love', 1.1)}
-            <span className="chef-label">Chef Poppy</span>
+    <div className={`page cake-page cake-stage-${cakeStage}`}>
+      <img className="cake-background-art" src="/background.png" alt="" />
+      <div className="cake-overlay" aria-hidden="true" />
+      <div className="cake-story">
+        <p className="eyebrow">A LITTLE BAKERY SURPRISE</p>
+        <h1>Red velvet wishes</h1>
+        <p className="cake-story-copy">
+          {cakeStage === 'ready' && 'Your cake is here! Make a wish before the candles disappear.'}
+          {cakeStage === 'countdown' && `Blow in ${cakeCountdown}...`}
+          {cakeStage === 'cut' && 'The candles are out. Time to cut the cake!'}
+          {cakeStage === 'eating' && 'A perfect bite for a very special birthday.'}
+        </p>
+        <div className="cake-stage-scene" aria-hidden="true">
+          <div className={`cake-object ${cakeStage === 'eating' ? 'cake-object-hidden' : ''}`}>
+            {cakeStage !== 'cut' && <img className="cake-art cake-complete-art" src={cakeAssets.cake} alt="A red velvet birthday cake" />}
+            {cakeStage === 'cut' && <img className="cake-slice-art" src={cakeAssets.slice} alt="A slice of red velvet cake" />}
+            {(cakeStage === 'cut' || cakeStage === 'eating') && <div className="cake-knife">🔪</div>}
           </div>
-          <div className="bowl">
-            <div className="batter-layer" style={{ opacity: cakeBaked ? 1 : 0.4 }} />
-          </div>
-          <div className="cake-prep-note">{cakeBaked ? 'The red velvet cake is ready to decorate.' : 'Mixing the batter and preparing the layers...'}</div>
+          {cakeStage === 'eating' && (
+            <div className="cake-eating-characters">
+              <img className="cake-eating-sloth" src={cakeAssets.sloth} alt="A sloth eating a slice of red velvet cake" />
+            </div>
+          )}
+          {cakeStage === 'countdown' && <div className="cake-countdown">{cakeCountdown}</div>}
+          {cakeStage === 'cut' && <div className="cake-cut-piece">A slice is ready!</div>}
         </div>
-
-        <div className="cake-area">
-          <div className={`cake-base ${cakeBaked ? 'baked' : ''}`}>
-            <div className="cake-layer layer-1" />
-            <div className="cake-layer layer-2" style={{ opacity: cakeBaked ? 1 : 0.15 }} />
-            <div className="cake-frosting" style={{ opacity: cakeBaked ? 1 : 0.1 }} />
-            {cakeBaked && <div className="cake-strawberries">🍓</div>}
-            {cakeBaked && <div className="cake-sprinkles">✨</div>}
-            {cakeBaked && <div className="cake-hearts">💖</div>}
-            {cakeLit && <div className="candle flame">{'🕯️'}</div>}
-          </div>
-
-          <div className="cake-actions">
-            {!cakeBaked && <button type="button" className="primary-button" disabled>Preparing cake...</button>}
-            {cakeBaked && !cakeLit && <button type="button" className="primary-button" onClick={() => setCakeLit(true)}>Light the Candle 🕯️</button>}
-            {cakeLit && !cakeBlown && <button type="button" className="primary-button" onClick={() => { setCakeBlown(true); setSmokeVisible(true); setTimeout(() => setScreen('birthday'), 1700) }}>Blow the Candle 🌬️</button>}
-          </div>
+        <div className="cake-story-actions">
+          {cakeStage === 'ready' && <button type="button" className="primary-button" onClick={() => { setCakeCountdown(3); setCakeStage('countdown') }}>Make a Wish ✨</button>}
+          {cakeStage === 'cut' && <button type="button" className="primary-button" onClick={() => setCakeStage('eating')}>Enjoy It ❤️</button>}
+          {cakeStage === 'eating' && <button type="button" className="primary-button" onClick={() => setScreen('birthday')}>Continue</button>}
         </div>
-        {smokeVisible && <div className="smoke-screen" />}
       </div>
     </div>
   )
@@ -823,11 +1026,6 @@ function App() {
           <span>💞</span>
           <span>💗</span>
         </div>
-        {birthdayReveal && (
-          <button type="button" className="primary-button" onClick={() => setScreen('slide')}>
-            There&apos;s Still One Tiny Surprise...
-          </button>
-        )}
       </div>
     </div>
   )
@@ -877,6 +1075,7 @@ function App() {
 
   const renderCurrentScreen = () => {
     if (screen === 'delivery') return renderDeliveryScene()
+    if (screen === 'gallery') return renderGalleryPage()
     if (screen === 'greeting') return renderGreeting()
     if (screen === 'map') return renderMap()
     if (screen === 'memory') return renderMemoryPage()
